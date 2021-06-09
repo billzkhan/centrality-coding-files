@@ -19,14 +19,14 @@ def haversine_vectorize(lon1, lat1, lon2, lat2):
 
     haver_formula = np.sin(newlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(newlon/2.0)**2
 
-    dist = 2 * np.arcsin(np.sqrt(haver_formula ))
+    dist = 2 * np.arcsin(np.sqrt(haver_formula))
     km = 6367 * dist #6367 for distance in KM for miles use 3958
     return km
 
 #%%
 sample1 = pd.read_excel('D:/BILAL/centrality/BUSROUTE.xlsx', sheet_name='테이블')
 sample2 = pd.read_excel('D:/BILAL/centrality/BUSROUTE_STOP_DETAIL(노선별 정류장 시퀀스).xlsx', sheet_name='테이블')
-sample2 = pd.merge(sample2,sample1[['ROUTESECT_GROUP_ID']],how='inner',on=['ROUTESECT_GROUP_ID'])
+sample2 = pd.merge(sample2,sample1[['ROUTESECT_GROUP_ID','ROUTE_ID']],how='inner',on=['ROUTESECT_GROUP_ID'])
 sample3 = pd.read_excel('D:/BILAL/centrality/BISNODE_NEW(버스정류장).xlsx', sheet_name='테이블')
 
 sample3['NODE_ID'] = sample3['NODE_ID'].astype(str)
@@ -171,18 +171,55 @@ col_list.remove('ROUTE_ID')
 schedue_sum['total_freq'] = schedue_sum[col_list].sum(axis=1)
 
 # %%
-schedue_com = pd.merge(schedue_sum[['ROUTE_ID','total_freq']],dfff[['ROUTESECT_GROUP_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='left', right_on='ROUTESECT_GROUP_ID', left_on='ROUTE_ID')
+schedue_com = pd.merge(schedue_sum[['ROUTE_ID','WEEK_OPERATION_FLAG','SAT_OPERATION_FLAG','HOLIDY_OPERATION_FLAG','total_freq']],dfff[['ROUTE_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='left', right_on='ROUTE_ID', left_on='ROUTE_ID')
 
 # %%
-xx = schedue_com.groupby(['NODE_ID_x']).agg({'total_freq': 'sum'})
+xx = schedue_com.groupby(['NODE_ID_x']).agg({'total_freq': 'sum', 'WEEK_OPERATION_FLAG': 'sum','SAT_OPERATION_FLAG': 'sum','HOLIDY_OPERATION_FLAG': 'sum'})
 xx.reset_index(inplace=True)
 # %%
 df_mod = dfff.drop_duplicates(subset='NODE_ID_x')
-schedue_com_new = pd.merge(xx[['NODE_ID_x','total_freq']],df_mod[['ROUTESECT_GROUP_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='inner', left_on='NODE_ID_x', right_on='NODE_ID_x')
+schedue_com_new = pd.merge(xx[['NODE_ID_x','total_freq','WEEK_OPERATION_FLAG','SAT_OPERATION_FLAG','HOLIDY_OPERATION_FLAG']],df_mod[['ROUTE_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='inner', left_on='NODE_ID_x', right_on='NODE_ID_x')
 
 # %%
 schedue_com_new.to_csv('D:/BILAL/centrality/schedue_com_new.py.csv', index = False)
 
+#%%
+#since importance is given to shorter distance, we will take the inverse of the total_frequency of buses to account for it
+schedue_com_new['total_freq'] = 1/schedue_com_new['total_freq']
 
 # %%
-#fourth
+#centrality based on bus frequencies
+edgelist = schedue_com_new[['NODE_ID_x','end_node','total_freq']]
+nodelist = schedue_com_new[['NODE_ID_x','LNG_x','LAT_x']]
+g = nx.Graph()
+# Add edges and edge attributes
+for i, elrow in edgelist.iterrows():
+    g.add_edge(elrow[0], elrow[1], attr_dict=elrow[2:].to_dict())
+nx.info(g)
+g.nodes()
+
+#%%
+df_seq = pd.DataFrame(dict(
+    #number of nodes connected to the node
+    DEGREE = dict(g.degree),
+    #nodes connected vs totlal possible connections
+    DEGREE_CENTRALITY = nx.degree_centrality(g),
+    #most important connection
+    EIGENVECTOR = nx.eigenvector_centrality(g,max_iter=1000, weight = 'total_freq'),
+    PAGERANK = nx.pagerank(g, weight = 'total_freq'),
+    #how close the other nodes are
+    # Closeness centrality [1] of a node u is the reciprocal of the sum of the shortest path distances from u to all n-1 other nodes.
+    CLOSENESS_CENTRALITY = nx.closeness_centrality(g, distance = 'total_freq'),
+    #how many times same node is traversed on shortest path
+    BETWEENNESS_CENTRALITY = nx.betweenness_centrality(g, weight = 'total_freq'),
+    # BETWEENNESS_EDGE = nx.edge_betweenness_centrality(g, weight = 'LINK_LEN')
+    # SHORTEST_DIST = nx.shortest_path_length(g, weight='len')
+))
+
+df_seq['NODE_ID_x'] = df_seq.index
+# dff = pd.merge(df3,df, how='left', on= 'NODE_ID')
+dff_seq = pd.merge(schedue_com_new, df_seq, how='left', left_on='NODE_ID_x', right_on='NODE_ID_x')
+# %%
+dff_seq.to_csv('D:/BILAL/centrality/busFrequency_centrality.py.csv', index = False)
+
+# %%
