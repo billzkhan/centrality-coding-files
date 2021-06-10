@@ -222,4 +222,65 @@ dff_seq = pd.merge(schedue_com_new, df_seq, how='left', left_on='NODE_ID_x', rig
 # %%
 dff_seq.to_csv('D:/BILAL/centrality/busFrequency_centrality.py.csv', index = False)
 
+#%%
+tripchain = pd.read_excel('D:/BILAL/centrality/trip chain data/BUS CARD DATA_20210527.xlsx')
+
+# %%
+#removing no hacha travelers or trips
+# tripchain = tripchain[tripchain['CARD_ALIT_STTN_ID'].notnull(),]
+tripchain = tripchain[tripchain['CARD_ALIT_STTN_ID'].notna()]
+
+# %%
+RouteVolume = tripchain.groupby(['CARD_ROUT_CD']).agg({'USER_CNT': 'sum'})
+RouteVolume.reset_index(inplace=True)
+
+# %%
+RouteVolume_com = pd.merge(RouteVolume[['CARD_ROUT_CD','USER_CNT']],dfff[['ROUTE_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='left', right_on='ROUTE_ID', left_on='CARD_ROUT_CD')
+
+# %%
+yy = RouteVolume_com.groupby(['NODE_ID_x']).agg({'USER_CNT': 'sum'})
+yy.reset_index(inplace=True)
+RouteVolume_com_new = pd.merge(yy[['NODE_ID_x','USER_CNT']],df_mod[['ROUTE_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='inner', left_on='NODE_ID_x', right_on='NODE_ID_x')
+
+# %%
+RouteVolume_com_new.to_csv('D:/BILAL/centrality/tripcahin_Volume.csv', index = False)
+
+# %%
+#since importance is given to shorter distance, we will take the inverse of the total_frequency of buses to account for it
+RouteVolume_com_new['USER_CNT'] = 1/RouteVolume_com_new['USER_CNT']
+
+# %%
+#centrality based on bus frequencies
+edgelist = RouteVolume_com_new[['NODE_ID_x','end_node','USER_CNT']]
+nodelist = RouteVolume_com_new[['NODE_ID_x','LNG_x','LAT_x']]
+g = nx.Graph()
+# Add edges and edge attributes
+for i, elrow in edgelist.iterrows():
+    g.add_edge(elrow[0], elrow[1], attr_dict=elrow[2:].to_dict())
+nx.info(g)
+g.nodes()
+
+#%%
+df_seq = pd.DataFrame(dict(
+    #number of nodes connected to the node
+    DEGREE = dict(g.degree),
+    #nodes connected vs totlal possible connections
+    DEGREE_CENTRALITY = nx.degree_centrality(g),
+    #most important connection
+    EIGENVECTOR = nx.eigenvector_centrality(g,max_iter=2000, weight = 'USER_CNT'),
+    PAGERANK = nx.pagerank(g, weight = 'USER_CNT'),
+    #how close the other nodes are
+    # Closeness centrality [1] of a node u is the reciprocal of the sum of the shortest path distances from u to all n-1 other nodes.
+    CLOSENESS_CENTRALITY = nx.closeness_centrality(g, distance = 'USER_CNT'),
+    #how many times same node is traversed on shortest path
+    BETWEENNESS_CENTRALITY = nx.betweenness_centrality(g, weight = 'USER_CNT'),
+    # BETWEENNESS_EDGE = nx.edge_betweenness_centrality(g, weight = 'LINK_LEN')
+    # SHORTEST_DIST = nx.shortest_path_length(g, weight='len')
+))
+
+df_seq['NODE_ID_x'] = df_seq.index
+# dff = pd.merge(df3,df, how='left', on= 'NODE_ID')
+dff_seq = pd.merge(RouteVolume_com_new, df_seq, how='left', left_on='NODE_ID_x', right_on='NODE_ID_x')
+# %%
+dff_seq.to_csv('D:/BILAL/centrality/tripcahin_Centrality.py.csv', index = False)
 # %%
