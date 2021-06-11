@@ -230,29 +230,33 @@ tripchain = pd.read_excel('D:/BILAL/centrality/trip chain data/BUS CARD DATA_202
 # tripchain = tripchain[tripchain['CARD_ALIT_STTN_ID'].notnull(),]
 tripchain = tripchain[tripchain['CARD_ALIT_STTN_ID'].notna()]
 
-# %%
-RouteVolume = tripchain.groupby(['CARD_ROUT_CD']).agg({'USER_CNT': 'sum'})
-RouteVolume.reset_index(inplace=True)
+#%%
+tripchain['CARD_BRD_STTN_ID'] = tripchain['CARD_BRD_STTN_ID'].astype(str)
+tripchain['CARD_ALIT_STTN_ID'] = tripchain['CARD_ALIT_STTN_ID'].astype(str)
+tripchain['ODpair'] = tripchain['CARD_BRD_STTN_ID'] + '-' + tripchain['CARD_ALIT_STTN_ID']
 
 # %%
-RouteVolume_com = pd.merge(RouteVolume[['CARD_ROUT_CD','USER_CNT']],dfff[['ROUTE_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='left', right_on='ROUTE_ID', left_on='CARD_ROUT_CD')
+ODVolume = tripchain.groupby(['ODpair']).agg({'USER_CNT': 'sum'})
+ODVolume.reset_index(inplace=True)
+
+#%%
+ODVolume[['NODE_ID_x','end_node']] = ODVolume['ODpair'].str.split('-', 1, expand=True)
+
+#%%
+ODVolume[['end_node','miss']] = ODVolume['end_node'].str.split('.', 1, expand=True)
+ODVolume = ODVolume.drop("miss", axis=1)
+ODVolume = ODVolume.drop("NODE_ID", axis=1)
 
 # %%
-yy = RouteVolume_com.groupby(['NODE_ID_x']).agg({'USER_CNT': 'sum'})
-yy.reset_index(inplace=True)
-RouteVolume_com_new = pd.merge(yy[['NODE_ID_x','USER_CNT']],df_mod[['ROUTE_ID','NODE_ID_x','end_node','LAT_x', 'LNG_x','LAT_y', 'LNG_y']],how='inner', left_on='NODE_ID_x', right_on='NODE_ID_x')
-
-# %%
-RouteVolume_com_new.to_csv('D:/BILAL/centrality/tripcahin_Volume.csv', index = False)
-
-# %%
-#since importance is given to shorter distance, we will take the inverse of the total_frequency of buses to account for it
-RouteVolume_com_new['USER_CNT'] = 1/RouteVolume_com_new['USER_CNT']
+ODVolume2 = pd.merge(ODVolume, sample3[['NODE_ID','LAT','LNG']], how='left', left_on='NODE_ID_x', right_on='NODE_ID')
+ODVolume2 = ODVolume2.drop("NODE_ID", axis=1)
+ODVolume3 = pd.merge(ODVolume2, sample3[['NODE_ID','LAT','LNG']], how='left', left_on='end_node', right_on='NODE_ID')
+ODVolume3 = ODVolume3.drop("NODE_ID", axis=1)
 
 # %%
 #centrality based on bus frequencies
-edgelist = RouteVolume_com_new[['NODE_ID_x','end_node','USER_CNT']]
-nodelist = RouteVolume_com_new[['NODE_ID_x','LNG_x','LAT_x']]
+edgelist = ODVolume3[['NODE_ID_x','end_node','USER_CNT']]
+nodelist = ODVolume3[['NODE_ID_x','LNG_x','LAT_x']]
 g = nx.Graph()
 # Add edges and edge attributes
 for i, elrow in edgelist.iterrows():
@@ -280,7 +284,7 @@ df_seq = pd.DataFrame(dict(
 
 df_seq['NODE_ID_x'] = df_seq.index
 # dff = pd.merge(df3,df, how='left', on= 'NODE_ID')
-dff_seq = pd.merge(RouteVolume_com_new, df_seq, how='left', left_on='NODE_ID_x', right_on='NODE_ID_x')
+dff_seq = pd.merge(ODVolume3, df_seq, how='left', left_on='NODE_ID_x', right_on='NODE_ID_x')
 # %%
 dff_seq.to_csv('D:/BILAL/centrality/tripcahin_Centrality.py.csv', index = False)
 # %%
