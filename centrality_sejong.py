@@ -2,11 +2,10 @@
 from itertools import groupby
 from functools import reduce
 import itertools
-import osmnx as ox
 import pandas as pd
 import numpy as np
 import networkx as nx
-
+from pandas import read_excel
 #%%
 #function to convert the degree to straight distance
 
@@ -25,6 +24,7 @@ def haversine_vectorize(lon1, lat1, lon2, lat2):
 
 #%%
 sample1 = pd.read_excel('D:/BILAL/centrality/BUSROUTE.xlsx', sheet_name='테이블')
+#%%
 sample2 = pd.read_excel('D:/BILAL/centrality/BUSROUTE_STOP_DETAIL(노선별 정류장 시퀀스).xlsx', sheet_name='테이블')
 sample2 = pd.merge(sample2,sample1[['ROUTESECT_GROUP_ID','ROUTE_ID']],how='inner',on=['ROUTESECT_GROUP_ID'])
 sample3 = pd.read_excel('D:/BILAL/centrality/BISNODE_NEW(버스정류장).xlsx', sheet_name='테이블')
@@ -40,7 +40,6 @@ df2 = pd.merge(df, sample3[['NODE_ID','LAT','LNG']], how='left', left_on='NODE_I
 df3 = pd.merge(df2, sample3[['NODE_ID','LAT','LNG']], how='left', left_on='end_node', right_on='NODE_ID')
 #%%
 df3['straight_d'] = haversine_vectorize(df3['LNG_x'],df3['LAT_x'],df3['LNG_y'],df3['LAT_y']) 
-
 
 #%%
 #converting our data into graph data
@@ -231,30 +230,51 @@ tripchain = pd.read_excel('D:/BILAL/centrality/trip chain data/BUS CARD DATA_202
 tripchain = tripchain[tripchain['CARD_ALIT_STTN_ID'].notna()]
 
 #%%
+#making OD pair
 tripchain['CARD_BRD_STTN_ID'] = tripchain['CARD_BRD_STTN_ID'].astype(str)
 tripchain['CARD_ALIT_STTN_ID'] = tripchain['CARD_ALIT_STTN_ID'].astype(str)
 tripchain['ODpair'] = tripchain['CARD_BRD_STTN_ID'] + '-' + tripchain['CARD_ALIT_STTN_ID']
 
 # %%
+#finding pairwise count of passengers by aggregating
 ODVolume = tripchain.groupby(['ODpair']).agg({'USER_CNT': 'sum'})
 ODVolume.reset_index(inplace=True)
 
 #%%
+#splitting it into o and d
 ODVolume[['NODE_ID_x','end_node']] = ODVolume['ODpair'].str.split('-', 1, expand=True)
 
 #%%
 ODVolume[['end_node','miss']] = ODVolume['end_node'].str.split('.', 1, expand=True)
 ODVolume = ODVolume.drop("miss", axis=1)
-ODVolume = ODVolume.drop("NODE_ID", axis=1)
+
+#%%
+# ODVolume = ODVolume.drop("NODE_ID", axis=1)
 
 # %%
+#getting lat lon of o and d
 ODVolume2 = pd.merge(ODVolume, sample3[['NODE_ID','LAT','LNG']], how='left', left_on='NODE_ID_x', right_on='NODE_ID')
 ODVolume2 = ODVolume2.drop("NODE_ID", axis=1)
 ODVolume3 = pd.merge(ODVolume2, sample3[['NODE_ID','LAT','LNG']], how='left', left_on='end_node', right_on='NODE_ID')
 ODVolume3 = ODVolume3.drop("NODE_ID", axis=1)
 
+#%%
+#straight distance between od pairs
+ODVolume3['straight_d'] = haversine_vectorize(ODVolume3['LNG_x'],ODVolume3['LAT_x'],ODVolume3['LNG_y'],ODVolume3['LAT_y']) 
+
+#%%
+ODVolume3['act_vol'] = ODVolume3['USER_CNT']
+#taking inverse of volume to show importance on the graph
+ODVolume3['USER_CNT'] = 1/ODVolume3['USER_CNT']
+
+#%%
+xx= tripchain[['CARD_BRD_STTN_ID','CARD_ROUT_CD']].drop_duplicates('CARD_ROUT_CD')
+#%%
+ODVolume4 = pd.merge(ODVolume3, tripchain[['CARD_BRD_STTN_ID','CARD_ROUT_CD']], how='left', left_on='NODE_ID_x', right_on='CARD_BRD_STTN_ID')
+
+
 # %%
-#centrality based on bus frequencies
+#centrality based on passenger frequencies on each O-D pair
 edgelist = ODVolume3[['NODE_ID_x','end_node','USER_CNT']]
 nodelist = ODVolume3[['NODE_ID_x','LNG_x','LAT_x']]
 g = nx.Graph()
@@ -287,4 +307,39 @@ df_seq['NODE_ID_x'] = df_seq.index
 dff_seq = pd.merge(ODVolume3, df_seq, how='left', left_on='NODE_ID_x', right_on='NODE_ID_x')
 # %%
 dff_seq.to_csv('D:/BILAL/centrality/tripcahin_Centrality.py.csv', index = False)
+# %%
+#Separate from centrality calculations but using trip chain data
+#long to wide data format
+#trip taken by each person formation
+#trip path wise passengers count_volume
+#trip path wise number of transfers done
+#euclidean distance between all trip stops sum divided by whole trip origin and destination
+
+#%%
+#transfers person wise
+v = tripchain.CARD_NO.value_counts()
+v = pd.DataFrame({'CARD_NO':v.index, 'transfers': v.values})
+v['transfers'] = v['transfers'] -1 
+
+#%%
+trip_start = tripchain.groupby('CARD_NO')['CARD_BRD_STTN_ID'].nth(0)
+
+# %%
+trip_end = tripchain.groupby('CARD_NO')['CARD_ALIT_STTN_ID'].nth(-1)
+
+# %%
+#merging start and end of a person
+trip_path = pd.merge(trip_start, trip_end, how='left', left_on='CARD_NO', right_on='CARD_NO')
+
+# %%
+#merging the number of transfers made
+trip_path = pd.merge(trip_path, v, how='left', left_on='CARD_NO', right_on='CARD_NO')
+
+#%%
+trip_path[['CARD_ALIT_STTN_ID','miss']] = trip_path['CARD_ALIT_STTN_ID'].str.split('.', 1, expand=True)
+trip_path = trip_path.drop("miss", axis=1)
+
+# %%
+trip_path['ODpair'] = trip_path['CARD_BRD_STTN_ID'] + '-' + trip_path['CARD_ALIT_STTN_ID']
+
 # %%
